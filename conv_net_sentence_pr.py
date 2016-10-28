@@ -85,6 +85,7 @@ def train_conv_net(datasets,
     q = T.matrix('q')
     p = T.matrix('p')
     pi = T.fscalar('pi')
+    p_b = T.matrix('p_b')
     Words = theano.shared(value = U, name = "Words")
     zero_vec_tensor = T.vector()
     zero_vec = np.zeros(img_w)
@@ -132,6 +133,8 @@ def train_conv_net(datasets,
 
     #divide train set into train/val sets 
     test_set_x = datasets[1][:,:img_h]
+    test_set_b = datasets[1][:,img_h:img_h*2]
+    test_set_tag = np.asarray(datasets[1][:,-2],"int32")
     test_set_y = np.asarray(datasets[1][:,-1],"int32")
     train_set = new_data[:n_train_batches*batch_size,:]
     val_set = new_data[n_train_batches*batch_size:,:]
@@ -159,10 +162,11 @@ def train_conv_net(datasets,
         teacher_pred_layers.append(teacher_layer0_output.flatten(2))
     teacher_layer1_input = T.concatenate(teacher_pred_layers, 1)
     predict_b = classifier.predict_p(teacher_layer1_input)
+    predict_student_b = theano.function([b], predict_b, allow_input_downcast = True)
 
-    predict_q = T.exp(-predict_b * tags.T * 10) * p
+    predict_q = T.exp(-(1-p_b) * tags.T * 100) * p
     predict_q = predict_q / predict_q.sum(axis=1).reshape((predict_q.shape[0], 1))
-    predict_teacher = theano.function([b, tags, p], predict_q, allow_input_downcast = True)
+    predict_teacher = theano.function([p_b, tags, p], predict_q, allow_input_downcast = True)
 
     #compile theano functions to get train/val/test errors
     val_model = theano.function([index], classifier.errors(y),
@@ -189,8 +193,22 @@ def train_conv_net(datasets,
         test_pred_layers.append(test_layer0_output.flatten(2))
     test_layer1_input = T.concatenate(test_pred_layers, 1)
     test_y_pred = classifier.predict(test_layer1_input)
+    test_p_pred = classifier.predict_p(test_layer1_input)
     test_error = T.mean(T.neq(test_y_pred, y))
     test_model_all = theano.function([x,y], test_error, allow_input_downcast = True)
+
+    test_q_pred_layers = []
+    test_q_layer0_input = Words[T.cast(b.flatten(),dtype="int32")].reshape((test_size,1,img_h,Words.shape[1]))
+    for conv_layer in conv_layers:
+        test_q_layer0_output = conv_layer.predict(test_q_layer0_input, test_size)
+        test_q_pred_layers.append(test_q_layer0_output.flatten(2))
+    test_q_layer1_input = T.concatenate(test_q_pred_layers, 1)
+    test_q_predict_b = classifier.predict_p(test_q_layer1_input)
+    test_predict_q = T.exp(-(1-test_q_predict_b) * tags.T * 100) * test_p_pred
+    test_predict_q = test_predict_q / test_predict_q.sum(axis=1).reshape((test_predict_q.shape[0], 1))
+    predict_q_y = (T.round(1-test_predict_q).T)[0]
+    test_error_q = T.mean(T.neq(predict_q_y, y))
+    test_model_q = theano.function([x, b, tags, y], test_error_q, allow_input_downcast = True)
     
     #start training over mini-batches
     print '... training'
@@ -212,9 +230,12 @@ def train_conv_net(datasets,
                 s = train_set_s[minibatch_index*batch_size:(minibatch_index+1)*batch_size]
                 tag = train_set_tag[minibatch_index*batch_size:(minibatch_index+1)*batch_size]
                 p = predict_student(s)
-                q = predict_teacher(b, [tag,tag], p)
+                p_b = predict_student_b(b)
+                q = predict_teacher(p_b, [tag,tag], p)
                 #if minibatch_index == 0:
+                #    print train_set[:,-1][minibatch_index*batch_size:(minibatch_index+1)*batch_size][0:10]
                 #    print p[0:10]
+                #    print p_b[0:10]
                 #    print q[0:10]
                 #    print tag[0:10]
                 cost_epoch = train_model(minibatch_index, q, pi)
@@ -228,9 +249,15 @@ def train_conv_net(datasets,
                 best_val_perf = val_perf
                 test_loss = test_model_all(test_set_x,test_set_y)        
                 test_perf = 1- test_loss
-        test_loss = test_model_all(test_set_x,test_set_y)        
-        test_perf = 1- test_loss
+                test_loss_q = test_model_q(test_set_x, test_set_b, [test_set_tag,test_set_tag], test_set_y)
+                test_perf_q = 1 - test_loss_q
+            test_loss = test_model_all(test_set_x,test_set_y)        
+            test_perf = 1- test_loss
+            test_loss_q = test_model_q(test_set_x, test_set_b, [test_set_tag,test_set_tag], test_set_y)
+            test_perf_q = 1 - test_loss_q
+
         print('test perf: %.2f %%' % (test_perf * 100.))
+        print('test perf q: %.2f %%' % (test_perf_q * 100.))
     
     return test_perf
 
@@ -370,7 +397,7 @@ if __name__=="__main__":
                               conv_non_linear="relu",
                               hidden_units=[100,2], 
                               shuffle_batch=True, 
-                              n_epochs=25, 
+                              n_epochs=10, 
                               sqr_norm_lim=9,
                               non_static=non_static,
                               batch_size=50,

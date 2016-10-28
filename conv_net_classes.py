@@ -13,7 +13,7 @@ import numpy
 import theano.tensor.shared_randomstreams
 import theano
 import theano.tensor as T
-from theano.tensor.signal import downsample
+from theano.tensor.signal import pool
 from theano.tensor.nnet import conv
 
 def ReLU(x):
@@ -68,7 +68,7 @@ class HiddenLayer(object):
 
 def _dropout_from_layer(rng, layer, p):
     """p is the probablity of dropping a unit
-"""
+    """
     srng = theano.tensor.shared_randomstreams.RandomStreams(rng.randint(999999))
     # p=1-p because 1's indicate keep and p is prob of dropping
     mask = srng.binomial(n=1, p=1-p, size=layer.shape)
@@ -145,6 +145,7 @@ class MLPDropout(object):
         # Use the negative log likelihood of the logistic regression layer as
         # the objective.
         self.dropout_negative_log_likelihood = self.dropout_layers[-1].negative_log_likelihood
+        self.cross_entropy_loss = self.dropout_layers[-1].cross_entropy_loss
         self.dropout_errors = self.dropout_layers[-1].errors
 
         self.negative_log_likelihood = self.layers[-1].negative_log_likelihood
@@ -171,7 +172,7 @@ class MLPDropout(object):
             else:
                 p_y_given_x = T.nnet.softmax(T.dot(next_layer_input, layer.W) + layer.b)
         return p_y_given_x
-        
+
 class MLP(object):
     """Multi-Layer Perceptron Class
 
@@ -316,6 +317,9 @@ class LogisticRegression(object):
         # i.e., the mean log-likelihood across the minibatch.
         return -T.mean(T.log(self.p_y_given_x)[T.arange(y.shape[0]), y])
 
+    def cross_entropy_loss(self, q):
+        return T.sum(-T.mean(T.log(self.p_y_given_x) * q))
+
     def errors(self, y):
         """Return a float representing the number of errors in the minibatch ;
     zero one loss over the size of the minibatch
@@ -390,12 +394,12 @@ class LeNetConvPoolLayer(object):
         conv_out = conv.conv2d(input=input, filters=self.W,filter_shape=self.filter_shape, image_shape=self.image_shape)
         if self.non_linear=="tanh":
             conv_out_tanh = T.tanh(conv_out + self.b.dimshuffle('x', 0, 'x', 'x'))
-            self.output = downsample.max_pool_2d(input=conv_out_tanh, ds=self.poolsize, ignore_border=True)
+            self.output = pool.pool_2d(input=conv_out_tanh, ds=self.poolsize, ignore_border=True)
         elif self.non_linear=="relu":
             conv_out_tanh = ReLU(conv_out + self.b.dimshuffle('x', 0, 'x', 'x'))
-            self.output = downsample.max_pool_2d(input=conv_out_tanh, ds=self.poolsize, ignore_border=True)
+            self.output = pool.pool_2d(input=conv_out_tanh, ds=self.poolsize, ignore_border=True)
         else:
-            pooled_out = downsample.max_pool_2d(input=conv_out, ds=self.poolsize, ignore_border=True)
+            pooled_out = pool.pool_2d(input=conv_out, ds=self.poolsize, ignore_border=True)
             self.output = pooled_out + self.b.dimshuffle('x', 0, 'x', 'x')
         self.params = [self.W, self.b]
         
@@ -407,12 +411,12 @@ class LeNetConvPoolLayer(object):
         conv_out = conv.conv2d(input=new_data, filters=self.W, filter_shape=self.filter_shape, image_shape=img_shape)
         if self.non_linear=="tanh":
             conv_out_tanh = T.tanh(conv_out + self.b.dimshuffle('x', 0, 'x', 'x'))
-            output = downsample.max_pool_2d(input=conv_out_tanh, ds=self.poolsize, ignore_border=True)
+            output = pool.pool_2d(input=conv_out_tanh, ds=self.poolsize, ignore_border=True)
         if self.non_linear=="relu":
             conv_out_tanh = ReLU(conv_out + self.b.dimshuffle('x', 0, 'x', 'x'))
-            output = downsample.max_pool_2d(input=conv_out_tanh, ds=self.poolsize, ignore_border=True)
+            output = pool.pool_2d(input=conv_out_tanh, ds=self.poolsize, ignore_border=True)
         else:
-            pooled_out = downsample.max_pool_2d(input=conv_out, ds=self.poolsize, ignore_border=True)
+            pooled_out = pool.pool_2d(input=conv_out, ds=self.poolsize, ignore_border=True)
             output = pooled_out + self.b.dimshuffle('x', 0, 'x', 'x')
         return output
         
