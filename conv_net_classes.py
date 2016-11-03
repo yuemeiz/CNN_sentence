@@ -318,7 +318,7 @@ class LogisticRegression(object):
         return -T.mean(T.log(self.p_y_given_x)[T.arange(y.shape[0]), y])
 
     def cross_entropy_loss(self, q):
-        return T.sum(-T.mean(T.log(self.p_y_given_x) * q))
+        return -T.mean((T.log(self.p_y_given_x) * q).sum(axis=1))
 
     def errors(self, y):
         """Return a float representing the number of errors in the minibatch ;
